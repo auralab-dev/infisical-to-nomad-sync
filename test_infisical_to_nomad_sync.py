@@ -16,7 +16,6 @@ BASE_ENV = {
     "NOMAD_TOKEN": "nomad-jwt",
     "NOMAD_ADDR": "http://nomad:4646",
     "NOMAD_VAR_PATH": "apps/secrets/example",
-    "NOMAD_VAR_PREFIX": "apps/secrets",
     "INFISICAL_IDENTITY_ID": "identity-id",
     "INFISICAL_ENVIRONMENT": "dev",
     "INFISICAL_SECRET_PATH": "/",

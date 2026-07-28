@@ -21,7 +21,6 @@ from .config import (
     TASK,
     UNAUTHORIZED_JOB_ID,
     VAR_PATH,
-    VAR_PREFIX,
     log,
 )
 from .crypto import nomad_signing_key_pem
@@ -138,7 +137,7 @@ def bootstrap_infisical() -> tuple[str, str, str]:
 _NOMAD_WORKLOAD_POLICY = """\
 namespace "{namespace}" {{
   variables {{
-    path "{prefix}/*" {{
+    path "{path}" {{
       # Nomad requires read access on the target path when a write
       # returns the resulting variable object.
       capabilities = ["write", "read"]
@@ -162,9 +161,7 @@ def bootstrap_nomad() -> str:
             "Nomad ACL bootstrap did not return SecretID JSON"
         ) from exc
 
-    policy = _NOMAD_WORKLOAD_POLICY.format(
-        namespace=NAMESPACE, prefix=VAR_PREFIX
-    )
+    policy = _NOMAD_WORKLOAD_POLICY.format(namespace=NAMESPACE, path=VAR_PATH)
     for job_id in (JOB_ID, UNAUTHORIZED_JOB_ID):
         policy_name = f"infisical-sync-e2e-writer-{job_id}"
         nomad_cli(

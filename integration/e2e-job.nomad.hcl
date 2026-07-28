@@ -29,7 +29,6 @@ job "infisical-sync-e2e" {
       env {
         NOMAD_ADDR        = "http://nomad:4646"
         NOMAD_NAMESPACE   = "default"
-        NOMAD_VAR_PREFIX  = "e2e/secrets"
         NOMAD_VAR_PATH    = "e2e/secrets/application"
 
         INFISICAL_URL         = "http://infisical:8080"

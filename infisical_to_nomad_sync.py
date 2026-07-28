@@ -66,7 +66,6 @@ class Config:
     nomad_addr: str
     nomad_namespace: str
     nomad_var_path: str
-    nomad_var_prefix: str
     infisical_url: str
     infisical_identity_id: str
     infisical_project_id: str | None
@@ -90,7 +89,6 @@ class Config:
             "NOMAD_TOKEN",
             "NOMAD_ADDR",
             "NOMAD_VAR_PATH",
-            "NOMAD_VAR_PREFIX",
             "INFISICAL_IDENTITY_ID",
             "INFISICAL_ENVIRONMENT",
             "INFISICAL_SECRET_PATH",
@@ -107,11 +105,6 @@ class Config:
             )
 
         path = validate_nomad_path(source["NOMAD_VAR_PATH"].strip())
-        prefix = validate_nomad_path(
-            source["NOMAD_VAR_PREFIX"].strip().rstrip("/"), "NOMAD_VAR_PREFIX"
-        )
-        if not path.startswith(prefix + "/"):
-            raise ConfigError("NOMAD_VAR_PATH must be below NOMAD_VAR_PREFIX")
 
         try:
             timeout = float(source.get("HTTP_TIMEOUT_SECONDS", "15"))
@@ -135,7 +128,6 @@ class Config:
             nomad_addr=clean_url("NOMAD_ADDR", source["NOMAD_ADDR"]),
             nomad_namespace=source.get("NOMAD_NAMESPACE", "default").strip() or "default",
             nomad_var_path=path,
-            nomad_var_prefix=prefix,
             infisical_url=clean_url(
                 "INFISICAL_URL", source.get("INFISICAL_URL", "https://app.infisical.com")
             ),
