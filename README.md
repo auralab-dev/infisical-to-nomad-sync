@@ -5,27 +5,29 @@ shot, then exit. Auths to both services with the same Nomad workload identity JW
 
 ## Env vars
 
-| Variable                               | Required | Default value                             |
-|----------------------------------------|----------|-------------------------------------------|
-| `NOMAD_TOKEN`                          | yes      | - (injected by `identity { env = true }`) |
-| `NOMAD_ADDR`                           | yes      | -                                         |
-| `NOMAD_VAR_PATH`                       | yes      | -                                         |
-| `NOMAD_VAR_PREFIX`                     | yes      | -                                         |
-| `INFISICAL_IDENTITY_ID`                | yes      | -                                         |
-| `INFISICAL_PROJECT_ID`                 | yes      | -                                         |
-| `INFISICAL_ENVIRONMENT`                | yes      | -                                         |
-| `INFISICAL_SECRET_PATH`                | yes      | -                                         |
-| `NOMAD_NAMESPACE`                      | no       | `default`                                 |
-| `INFISICAL_URL`                        | no       | `https://app.infisical.com`               |
-| `INFISICAL_ORGANIZATION_SLUG`          | no       | unset                                     |
-| `INFISICAL_TAG_FILTERS`                | no       | empty (comma-separated slugs)             |
-| `INFISICAL_METADATA_FILTER`            | no       | unset                                     |
-| `INFISICAL_RECURSIVE`                  | no       | `false`                                   |
-| `INFISICAL_INCLUDE_IMPORTS`            | no       | `false`                                   |
-| `INFISICAL_INCLUDE_PERSONAL_OVERRIDES` | no       | `false`                                   |
-| `INFISICAL_EXPAND_REFERENCES`          | no       | `true`                                    |
-| `HTTP_TIMEOUT_SECONDS`                 | no       | `15`                                      |
-| `LOG_LEVEL`                            | no       | `INFO`                                    |
+| Variable                               | Required      | Default value                             |
+|----------------------------------------|---------------|-------------------------------------------|
+| `NOMAD_TOKEN`                          | yes           | - (injected by `identity { env = true }`) |
+| `NOMAD_ADDR`                           | yes           | -                                         |
+| `NOMAD_VAR_PATH`                       | yes           | -                                         |
+| `INFISICAL_IDENTITY_ID`                | yes           | -                                         |
+| `INFISICAL_PROJECT_SLUG`               | one of*       | -                                         |
+| `INFISICAL_PROJECT_ID`                 | one of*       | -                                         |
+| `INFISICAL_ENVIRONMENT`                | yes           | -                                         |
+| `INFISICAL_SECRET_PATH`                | yes           | -                                         |
+| `NOMAD_NAMESPACE`                      | no            | `default`                                 |
+| `INFISICAL_URL`                        | no            | `https://app.infisical.com`               |
+| `INFISICAL_ORGANIZATION_SLUG`          | no            | unset                                     |
+| `INFISICAL_TAG_FILTERS`                | no            | empty (comma-separated slugs)             |
+| `INFISICAL_METADATA_FILTER`            | no            | unset                                     |
+| `INFISICAL_RECURSIVE`                  | no            | `false`                                   |
+| `INFISICAL_INCLUDE_IMPORTS`            | no            | `false`                                   |
+| `INFISICAL_INCLUDE_PERSONAL_OVERRIDES` | no            | `false`                                   |
+| `INFISICAL_EXPAND_REFERENCES`          | no            | `true`                                    |
+| `HTTP_TIMEOUT_SECONDS`                 | no            | `15`                                      |
+| `LOG_LEVEL`                            | no            | `INFO`                                    |
+
+\* Configure a project slug (preferred) or project ID. If both are set, `INFISICAL_PROJECT_SLUG` takes precedence.
 
 ### Process exit codes
 
@@ -37,73 +39,6 @@ shot, then exit. Auths to both services with the same Nomad workload identity JW
 | `3`  | Infisical error    |
 | `4`  | Unsafe secret data |
 | `5`  | Nomad error        |
-
-## Example Nomad job
-
-```hcl
-job "infisical-sync" {
-  namespace = "apps"
-
-  group "sync" {
-    task "sync" {
-      driver = "docker"
-
-      config {
-        image   = "python:3.14-slim"
-        command = "python"
-        args = ["/app/infisical_to_nomad_sync.py"]
-      }
-
-      identity { env = true }
-
-      env {
-        NOMAD_ADDR       = "https://nomad.example:4646"
-        NOMAD_NAMESPACE  = "apps"
-        NOMAD_VAR_PREFIX = "apps/secrets"
-        NOMAD_VAR_PATH   = "apps/secrets/application"
-
-        INFISICAL_URL         = "https://app.infisical.com"
-        INFISICAL_IDENTITY_ID = "<identity-id>"
-        INFISICAL_PROJECT_ID  = "<project-id>"
-        INFISICAL_ENVIRONMENT = "prod"
-        INFISICAL_SECRET_PATH = "/"
-
-        INFISICAL_METADATA_FILTER = "key=branch,value=main"
-      }
-
-      resources { cpu = 100; memory = 64 }
-    }
-  }
-}
-```
-
-## Example ACL policy
-
-Apply this workload-associated policy so the task's JWT gets write access to its variable prefix:
-
-```sh
-nomad acl policy apply \
-  -namespace "apps" \
-  -job "infisical-sync" \
-  -group "sync" \
-  -task "sync" \
-  infisical-sync-writer \
-  ./nomad-sync.policy.hcl
-```
-
-`nomad-sync.policy.hcl`:
-
-```hcl
-namespace "apps" {
-  variables {
-    path "apps/secrets/*" {
-      capabilities = ["write", "read"]   # read needed for write response
-    }
-  }
-}
-```
-
-The task needs no long-lived ACL token - its workload JWT automatically gets the policy above.
 
 ## Infisical setup
 
@@ -117,6 +52,143 @@ Create a machine identity with **JWT Auth**
 | Claims -> `nomad_namespace` | -                                                                          | no       |
 | Claims -> `nomad_job_id`    | -                                                                          | no       |
 | Claims -> `nomad_task`      | -                                                                          | no       |
+
+## Example Nomad sync job
+
+```hcl
+job "infisical-sync" {
+  namespace = "apps"
+  type      = "batch"
+
+  periodic {
+    crons = [
+      "0 */5 * * * *"
+    ]
+    time_zone        = "UTC"
+    prohibit_overlap = true
+  }
+
+  group "sync" {
+    task "sync" {
+      driver = "docker"
+
+      config {
+        image = "ghcr.io/auralab-dev/infisical-to-nomad-sync:1.1.0"
+      }
+
+      identity { env = true }
+
+      env {
+        NOMAD_ADDR      = "http://<nomad-address>:4646"
+        NOMAD_NAMESPACE = "apps"
+        NOMAD_VAR_PATH  = "apps/secrets"
+
+        INFISICAL_URL          = "https://app.infisical.com"
+        INFISICAL_IDENTITY_ID  = "<identity-id>"
+        INFISICAL_PROJECT_SLUG = "<project-slug>"
+        INFISICAL_ENVIRONMENT  = "prod"
+        INFISICAL_SECRET_PATH  = "/"
+
+        INFISICAL_METADATA_FILTER = "key=branch,value=main"
+      }
+
+      resources {
+        cpu    = 100
+        memory = 64
+      }
+    }
+  }
+}
+```
+
+## Example ACL policy
+
+Apply this workload-associated policy so the task's JWT gets access to its exact variable path:
+
+`nomad-sync.policy.hcl`:
+
+```hcl
+namespace "apps" {
+  variables {
+    path "apps/secrets" {
+      capabilities = ["read", "write"]
+    }
+  }
+}
+```
+
+```sh
+nomad acl policy apply \
+  -namespace "apps" \
+  -job "infisical-sync" \
+  infisical-sync-apps \
+  ./nomad-sync.policy.hcl
+```
+
+The task needs no long-lived ACL token - its workload JWT automatically gets the policy above.
+
+## Example app
+
+```hcl
+job "alpine" {
+  namespace = "apps"
+  type      = "service"
+
+  group "app" {
+    task "app" {
+      driver = "docker"
+
+      identity {
+        env = true
+      }
+
+      config {
+        image   = "alpine:3.22"
+        command = "/usr/bin/tail"
+        args = [
+          "-f", "/dev/null",
+        ]
+      }
+
+      template {
+        destination = "/local/.env"
+        env         = true
+        change_mode = "restart"
+
+        data = <<EOH
+{{ with nomadVar "apps/secrets@apps" }}
+{{ range $key, $value := . }}
+{{ $key }}={{ $value | toJSON }}
+{{ end }}
+{{ end }}
+EOH
+      }
+    }
+  }
+}
+```
+
+Example app policy `apps-read-secrets.hcl`
+
+```hcl
+namespace "apps" {
+  variables {
+    path "apps/secrets" {
+      capabilities = ["read"]
+    }
+  }
+}
+```
+
+Attach policy to workload
+
+```bash
+nomad acl policy apply \
+  -namespace "apps" \
+  -job "alpine" \
+  apps-read-secrets \
+  ./apps-read-secrets.hcl
+```
 
 ## Development
 
