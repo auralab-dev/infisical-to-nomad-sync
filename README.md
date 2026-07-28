@@ -81,7 +81,7 @@ job "infisical-sync" {
       driver = "docker"
 
       config {
-        image = "ghcr.io/auralab-dev/infisical-to-nomad-sync:1.1.0"
+        image = "ghcr.io/auralab-dev/infisical-to-nomad-sync:1.2.0"
       }
 
       identity { env = true }
