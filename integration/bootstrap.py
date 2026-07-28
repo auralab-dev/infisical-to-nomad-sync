@@ -14,6 +14,7 @@ from .config import (
     JOB_ID,
     NAMESPACE,
     NOMAD_URL,
+    PROJECT_SLUG,
     ROOT,
     SECRET_PATH,
     SECRETS,
@@ -60,7 +61,7 @@ def bootstrap_infisical() -> tuple[str, str, str]:
         body={
             "projectName": "Nomad Sync E2E",
             "projectDescription": "Ephemeral integration-test project",
-            "slug": "nomad-sync-e2e",
+            "slug": PROJECT_SLUG,
             "template": "default",
             "type": "secret-manager",
         },
@@ -227,19 +228,17 @@ def put_stale_variable(token: str) -> None:
     )
 
 
-def render_job(job_id: str, project_id: str, identity_id: str) -> str:
+def render_job(job_id: str, identity_id: str) -> str:
     """Load the Nomad job template and substitute runtime values."""
     template = (ROOT / "integration" / "e2e-job.nomad.hcl").read_text()
     return (
         template.replace('job "infisical-sync-e2e"', f'job "{job_id}"')
         .replace("__INFISICAL_IDENTITY_ID__", identity_id)
-        .replace("__INFISICAL_PROJECT_ID__", project_id)
+        .replace("__INFISICAL_PROJECT_SLUG__", PROJECT_SLUG)
     )
 
 
-def submit_job(
-    job_id: str, project_id: str, identity_id: str, token: str
-) -> None:
+def submit_job(job_id: str, identity_id: str, token: str) -> None:
     """Parse and register a Nomad batch job through the HTTP API."""
     log(f"Submitting Nomad job {job_id}")
     parsed = nomad_api(
@@ -247,7 +246,7 @@ def submit_job(
         f"/v1/jobs/parse?namespace={NAMESPACE}",
         token=token,
         body={
-            "JobHCL": render_job(job_id, project_id, identity_id),
+            "JobHCL": render_job(job_id, identity_id),
             "Canonicalize": True,
         },
     )

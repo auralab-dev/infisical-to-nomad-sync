@@ -22,6 +22,7 @@ VAR_PATH = "e2e/secrets/application"
 VAR_PREFIX = "e2e/secrets"
 ENVIRONMENT = "dev"
 SECRET_PATH = "/apps"
+PROJECT_SLUG = "nomad-sync-e2e"
 
 SECRETS = {
     "API_KEY": ("integration-api-key", "main"),

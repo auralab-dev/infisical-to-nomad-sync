@@ -69,7 +69,8 @@ class Config:
     nomad_var_prefix: str
     infisical_url: str
     infisical_identity_id: str
-    infisical_project_id: str
+    infisical_project_id: str | None
+    infisical_project_slug: str | None
     infisical_environment: str
     infisical_secret_path: str
     infisical_organization_slug: str | None
@@ -91,13 +92,19 @@ class Config:
             "NOMAD_VAR_PATH",
             "NOMAD_VAR_PREFIX",
             "INFISICAL_IDENTITY_ID",
-            "INFISICAL_PROJECT_ID",
             "INFISICAL_ENVIRONMENT",
             "INFISICAL_SECRET_PATH",
         )
         missing = [name for name in required if not source.get(name, "").strip()]
         if missing:
             raise ConfigError("missing required environment variables: " + ", ".join(missing))
+
+        project_id = source.get("INFISICAL_PROJECT_ID", "").strip() or None
+        project_slug = source.get("INFISICAL_PROJECT_SLUG", "").strip() or None
+        if not project_id and not project_slug:
+            raise ConfigError(
+                "one of INFISICAL_PROJECT_SLUG or INFISICAL_PROJECT_ID is required"
+            )
 
         path = validate_nomad_path(source["NOMAD_VAR_PATH"].strip())
         prefix = validate_nomad_path(
@@ -133,7 +140,8 @@ class Config:
                 "INFISICAL_URL", source.get("INFISICAL_URL", "https://app.infisical.com")
             ),
             infisical_identity_id=source["INFISICAL_IDENTITY_ID"].strip(),
-            infisical_project_id=source["INFISICAL_PROJECT_ID"].strip(),
+            infisical_project_id=project_id,
+            infisical_project_slug=project_slug,
             infisical_environment=source["INFISICAL_ENVIRONMENT"].strip(),
             infisical_secret_path=source["INFISICAL_SECRET_PATH"].strip(),
             infisical_organization_slug=(
@@ -213,11 +221,63 @@ def infisical_login(
     return access_token
 
 
-def fetch_secrets(
+def resolve_project_id(
     session: requests.Session, config: Config, access_token: str
+) -> str:
+    """Return the configured project ID, resolving a preferred slug when present."""
+    if not config.infisical_project_slug:
+        if not config.infisical_project_id:
+            raise ConfigError(
+                "one of INFISICAL_PROJECT_SLUG or INFISICAL_PROJECT_ID is required"
+            )
+        return config.infisical_project_id
+
+    try:
+        response = session.get(
+            f"{config.infisical_url}/api/v1/projects",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=config.timeout_seconds,
+        )
+    except requests.RequestException as exc:
+        raise InfisicalError(f"project list request failed: {exc}") from exc
+    if not response.ok:
+        raise InfisicalError(
+            f"project list failed with HTTP {response.status_code}: {safe_api_message(response)}"
+        )
+    try:
+        projects = response.json()["projects"]
+    except (ValueError, KeyError, TypeError) as exc:
+        raise InfisicalError("project list response did not contain a projects list") from exc
+    if not isinstance(projects, list):
+        raise InfisicalError("project list response did not contain a projects list")
+
+    matches = [
+        project
+        for project in projects
+        if isinstance(project, dict)
+        and project.get("slug") == config.infisical_project_slug
+    ]
+    if not matches:
+        raise InfisicalError(
+            f"no accessible Infisical project has slug {config.infisical_project_slug!r}"
+        )
+    if len(matches) > 1:
+        raise InfisicalError(
+            f"multiple accessible Infisical projects have slug {config.infisical_project_slug!r}"
+        )
+    project_id = matches[0].get("id")
+    if not isinstance(project_id, str) or not project_id:
+        raise InfisicalError(
+            f"Infisical project {config.infisical_project_slug!r} has an invalid id"
+        )
+    return project_id
+
+
+def fetch_secrets(
+    session: requests.Session, config: Config, access_token: str, project_id: str
 ) -> dict[str, Any]:
     params: dict[str, str] = {
-        "projectId": config.infisical_project_id,
+        "projectId": project_id,
         "environment": config.infisical_environment,
         "secretPath": config.infisical_secret_path,
         "viewSecretValue": "true",
@@ -347,13 +407,15 @@ def run(config: Config, session: requests.Session | None = None) -> None:
     http = session or requests.Session()
     LOGGER.info("Authenticating to Infisical with Nomad workload identity")
     access_token = infisical_login(http, config)
+    project_id = resolve_project_id(http, config, access_token)
     LOGGER.info(
-        "Fetching Infisical secrets: project=%s environment=%s path=%s",
-        config.infisical_project_id,
+        "Fetching Infisical secrets: project=%s project_id=%s environment=%s path=%s",
+        config.infisical_project_slug or config.infisical_project_id,
+        project_id,
         config.infisical_environment,
         config.infisical_secret_path,
     )
-    response = fetch_secrets(http, config, access_token)
+    response = fetch_secrets(http, config, access_token, project_id)
     items = secrets_to_items(response)
     size = validate_nomad_items(items)
     LOGGER.info(

@@ -124,16 +124,14 @@ def main() -> int:
     try:
         wait_for(f"{INFISICAL_URL}/api/status", "Infisical")
         wait_for(f"{NOMAD_URL}/v1/status/leader", "Nomad")
-        _, project_id, identity_id = bootstrap_infisical()
+        _, _, identity_id = bootstrap_infisical()
         management_token = bootstrap_nomad()
         put_stale_variable(management_token)
-        submit_job(JOB_ID, project_id, identity_id, management_token)
+        submit_job(JOB_ID, identity_id, management_token)
         assert_success(
             wait_for_job(JOB_ID, management_token), management_token
         )
-        submit_job(
-            UNAUTHORIZED_JOB_ID, project_id, identity_id, management_token
-        )
+        submit_job(UNAUTHORIZED_JOB_ID, identity_id, management_token)
         assert_infisical_rejection(
             wait_for_job(UNAUTHORIZED_JOB_ID, management_token)
         )

@@ -34,7 +34,7 @@ job "infisical-sync-e2e" {
 
         INFISICAL_URL         = "http://infisical:8080"
         INFISICAL_IDENTITY_ID = "__INFISICAL_IDENTITY_ID__"
-        INFISICAL_PROJECT_ID  = "__INFISICAL_PROJECT_ID__"
+        INFISICAL_PROJECT_SLUG = "__INFISICAL_PROJECT_SLUG__"
         INFISICAL_ENVIRONMENT = "dev"
         INFISICAL_SECRET_PATH = "/apps"
         INFISICAL_METADATA_FILTER = "key=branch,value=main"
