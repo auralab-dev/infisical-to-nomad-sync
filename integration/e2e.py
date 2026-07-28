@@ -20,6 +20,8 @@ from .config import (
     JOB_ID,
     NAMESPACE,
     NOMAD_URL,
+    ORPHAN_KEY,
+    ORPHAN_VALUE,
     TASK,
     TIMEOUT,
     UNAUTHORIZED_JOB_ID,
@@ -64,8 +66,13 @@ def terminal_exit_code(task_state: dict) -> int | None:
 # ---------------------------------------------------------------------------
 
 
-def assert_success(allocation: dict, token: str) -> None:
-    """Verify the authorized job completed and wrote the expected secrets."""
+def assert_success(
+    allocation: dict,
+    token: str,
+    expected_items: dict[str, str],
+    expected_log: str,
+) -> None:
+    """Verify an authorized job's result and orphan log."""
     task_state = allocation["TaskStates"][TASK]
     exit_code = terminal_exit_code(task_state)
     if (
@@ -86,13 +93,22 @@ def assert_success(allocation: dict, token: str) -> None:
         "GET", f"/v1/var/{VAR_PATH}?namespace={NAMESPACE}", token=token
     )
     actual = variable.get("Items") if isinstance(variable, dict) else None
-    if actual != EXPECTED_ITEMS:
+    if actual != expected_items:
         actual_keys = sorted(actual) if isinstance(actual, dict) else None
         raise E2EError(
             "Nomad variable contents did not match expected keys: "
-            f"actual={actual_keys}, expected={sorted(EXPECTED_ITEMS)}"
+            f"actual={actual_keys}, expected={sorted(expected_items)}"
         )
-    log("Happy-path sync and replace semantics passed")
+    stderr = nomad_task_logs(allocation, token, "stderr")
+    if expected_log not in stderr:
+        raise E2EError(
+            f"Nomad job logs did not contain {expected_log!r}.\n"
+            f"task stderr:\n{stderr}"
+        )
+
+
+def purge_job(job_id: str, token: str) -> None:
+    nomad_api("DELETE", f"/v1/job/{job_id}?purge=true", token=token)
 
 
 def assert_infisical_rejection(allocation: dict) -> None:
@@ -127,10 +143,27 @@ def main() -> int:
         _, _, identity_id = bootstrap_infisical()
         management_token = bootstrap_nomad()
         put_stale_variable(management_token)
-        submit_job(JOB_ID, identity_id, management_token)
+        submit_job(JOB_ID, identity_id, management_token, "full")
         assert_success(
-            wait_for_job(JOB_ID, management_token), management_token
+            wait_for_job(JOB_ID, management_token),
+            management_token,
+            EXPECTED_ITEMS,
+            "Found 1 orphaned Nomad secrets: STALE; sync_mode=full action=remove",
         )
+        log("Full sync removed the orphan and logged the action")
+
+        purge_job(JOB_ID, management_token)
+        put_stale_variable(management_token, include_existing_secret=True)
+        submit_job(JOB_ID, identity_id, management_token, "leave-orphans")
+        assert_success(
+            wait_for_job(JOB_ID, management_token),
+            management_token,
+            {**EXPECTED_ITEMS, ORPHAN_KEY: ORPHAN_VALUE},
+            "Found 1 orphaned Nomad secrets: STALE; "
+            "sync_mode=leave-orphans action=preserve",
+        )
+        log("Leave-orphans sync preserved the orphan and updated managed values")
+
         submit_job(UNAUTHORIZED_JOB_ID, identity_id, management_token)
         assert_infisical_rejection(
             wait_for_job(UNAUTHORIZED_JOB_ID, management_token)

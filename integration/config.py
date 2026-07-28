@@ -29,6 +29,8 @@ SECRETS = {
     "IGNORED_BRANCH_SECRET": ("must-not-arrive", "dev"),
 }
 EXPECTED_ITEMS = {key: value for key, (value, branch) in SECRETS.items() if branch == "main"}
+ORPHAN_KEY = "STALE"
+ORPHAN_VALUE = "manually-added-nomad-secret"
 
 
 class E2EError(RuntimeError):

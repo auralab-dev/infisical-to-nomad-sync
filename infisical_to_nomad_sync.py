@@ -17,6 +17,7 @@ import requests
 LOGGER = logging.getLogger("infisical-to-nomad-sync")
 NOMAD_PATH_RE = re.compile(r"^[a-zA-Z0-9-_~/]{1,128}$")
 NOMAD_ITEMS_LIMIT_BYTES = 64 * 1024
+SYNC_MODES = {"full", "leave-orphans"}
 
 
 class ConfigError(ValueError):
@@ -79,6 +80,7 @@ class Config:
     include_imports: bool
     include_personal_overrides: bool
     expand_references: bool
+    sync_mode: str
     timeout_seconds: float
     log_level: str
 
@@ -116,6 +118,10 @@ class Config:
         log_level = source.get("LOG_LEVEL", "INFO").strip().upper()
         if log_level not in logging.getLevelNamesMapping():
             raise ConfigError(f"invalid LOG_LEVEL: {log_level}")
+
+        sync_mode = source.get("SYNC_MODE", "leave-orphans").strip().lower()
+        if sync_mode not in SYNC_MODES:
+            raise ConfigError("SYNC_MODE must be one of: full, leave-orphans")
 
         tags = tuple(
             tag.strip()
@@ -156,6 +162,7 @@ class Config:
                 "INFISICAL_EXPAND_REFERENCES",
                 source.get("INFISICAL_EXPAND_REFERENCES", "true"),
             ),
+            sync_mode=sync_mode,
             timeout_seconds=timeout,
             log_level=log_level,
         )
@@ -368,6 +375,52 @@ def validate_nomad_items(items: Mapping[str, str]) -> int:
     return size
 
 
+def get_nomad_variable_items(
+    session: requests.Session, config: Config
+) -> dict[str, str]:
+    encoded_path = quote(config.nomad_var_path, safe="/-_~")
+    try:
+        response = session.get(
+            f"{config.nomad_addr}/v1/var/{encoded_path}",
+            headers={"Authorization": f"Bearer {config.nomad_token}"},
+            params={"namespace": config.nomad_namespace},
+            timeout=config.timeout_seconds,
+        )
+    except requests.RequestException as exc:
+        raise NomadError(f"Variable read request failed: {exc}") from exc
+    if response.status_code == 404:
+        return {}
+    if not response.ok:
+        raise NomadError(
+            f"Variable read failed with HTTP {response.status_code}: {safe_api_message(response)}"
+        )
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise NomadError("Variable read response was not valid JSON") from exc
+    items = payload.get("Items") if isinstance(payload, dict) else None
+    if not isinstance(items, dict) or any(
+        not isinstance(key, str) or not isinstance(value, str)
+        for key, value in items.items()
+    ):
+        raise NomadError("Variable read response did not contain valid string Items")
+    return dict(items)
+
+
+def build_target_items(
+    desired: Mapping[str, str], current: Mapping[str, str], sync_mode: str
+) -> tuple[dict[str, str], tuple[str, ...]]:
+    """Build the Nomad Items map and return sorted Nomad-only keys."""
+    orphans = tuple(sorted(current.keys() - desired.keys()))
+    if sync_mode == "full":
+        return dict(desired), orphans
+    if sync_mode == "leave-orphans":
+        target = dict(current)
+        target.update(desired)
+        return target, orphans
+    raise ConfigError("SYNC_MODE must be one of: full, leave-orphans")
+
+
 def put_nomad_variable(
     session: requests.Session, config: Config, items: Mapping[str, str]
 ) -> None:
@@ -408,7 +461,22 @@ def run(config: Config, session: requests.Session | None = None) -> None:
         config.infisical_secret_path,
     )
     response = fetch_secrets(http, config, access_token, project_id)
-    items = secrets_to_items(response)
+    desired_items = secrets_to_items(response)
+    current_items = get_nomad_variable_items(http, config)
+    items, orphans = build_target_items(
+        desired_items, current_items, config.sync_mode
+    )
+    if orphans:
+        action = "remove" if config.sync_mode == "full" else "preserve"
+        LOGGER.info(
+            "Found %d orphaned Nomad secrets: %s; sync_mode=%s action=%s",
+            len(orphans),
+            ", ".join(orphans),
+            config.sync_mode,
+            action,
+        )
+    else:
+        LOGGER.info("Found 0 orphaned Nomad secrets; sync_mode=%s", config.sync_mode)
     size = validate_nomad_items(items)
     LOGGER.info(
         "Writing %d secrets (%d bytes) to Nomad namespace=%s path=%s",

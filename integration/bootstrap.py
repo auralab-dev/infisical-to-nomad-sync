@@ -15,6 +15,8 @@ from .config import (
     NAMESPACE,
     NOMAD_URL,
     PROJECT_SLUG,
+    ORPHAN_KEY,
+    ORPHAN_VALUE,
     ROOT,
     SECRET_PATH,
     SECRETS,
@@ -177,23 +179,19 @@ def bootstrap_nomad() -> str:
             token=management_token,
             input_data=policy,
         )
-        policies = nomad_api(
+        attached = nomad_api(
             "GET",
-            f"/v1/acl/policies?namespace={NAMESPACE}",
+            f"/v1/acl/policy/{policy_name}",
             token=management_token,
         )
-        attached = next(
-            (item for item in policies if item.get("Name") == policy_name),
-            None,
-        )
-        job_acl = attached.get("JobACL", {}) if attached else {}
+        job_acl = attached.get("JobACL", {}) if isinstance(attached, dict) else {}
         expected_acl = {
             "Namespace": NAMESPACE,
             "JobID": job_id,
             "Group": GROUP,
             "Task": TASK,
         }
-        if not attached or any(
+        if not isinstance(attached, dict) or any(
             job_acl.get(key) != value for key, value in expected_acl.items()
         ):
             raise E2EError(
@@ -211,8 +209,11 @@ def bootstrap_nomad() -> str:
     return management_token
 
 
-def put_stale_variable(token: str) -> None:
-    """Write a placeholder variable so the sync test can verify replacement."""
+def put_stale_variable(token: str, include_existing_secret: bool = False) -> None:
+    """Write an orphan and optionally a stale managed value before a sync."""
+    items = {ORPHAN_KEY: ORPHAN_VALUE}
+    if include_existing_secret:
+        items["API_KEY"] = "stale-infisical-value"
     nomad_api(
         "PUT",
         f"/v1/var/{VAR_PATH}",
@@ -220,22 +221,30 @@ def put_stale_variable(token: str) -> None:
         body={
             "Namespace": NAMESPACE,
             "Path": VAR_PATH,
-            "Items": {"STALE": "this must be removed"},
+            "Items": items,
         },
     )
 
 
-def render_job(job_id: str, identity_id: str) -> str:
+def render_job(
+    job_id: str, identity_id: str, sync_mode: str = "leave-orphans"
+) -> str:
     """Load the Nomad job template and substitute runtime values."""
     template = (ROOT / "integration" / "e2e-job.nomad.hcl").read_text()
     return (
         template.replace('job "infisical-sync-e2e"', f'job "{job_id}"')
         .replace("__INFISICAL_IDENTITY_ID__", identity_id)
         .replace("__INFISICAL_PROJECT_SLUG__", PROJECT_SLUG)
+        .replace("__SYNC_MODE__", sync_mode)
     )
 
 
-def submit_job(job_id: str, identity_id: str, token: str) -> None:
+def submit_job(
+    job_id: str,
+    identity_id: str,
+    token: str,
+    sync_mode: str = "leave-orphans",
+) -> None:
     """Parse and register a Nomad batch job through the HTTP API."""
     log(f"Submitting Nomad job {job_id}")
     parsed = nomad_api(
@@ -243,7 +252,7 @@ def submit_job(job_id: str, identity_id: str, token: str) -> None:
         f"/v1/jobs/parse?namespace={NAMESPACE}",
         token=token,
         body={
-            "JobHCL": render_job(job_id, identity_id),
+            "JobHCL": render_job(job_id, identity_id, sync_mode),
             "Canonicalize": True,
         },
     )

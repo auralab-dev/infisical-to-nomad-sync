@@ -5,29 +5,37 @@ shot, then exit. Auths to both services with the same Nomad workload identity JW
 
 ## Env vars
 
-| Variable                               | Required      | Default value                             |
-|----------------------------------------|---------------|-------------------------------------------|
-| `NOMAD_TOKEN`                          | yes           | - (injected by `identity { env = true }`) |
-| `NOMAD_ADDR`                           | yes           | -                                         |
-| `NOMAD_VAR_PATH`                       | yes           | -                                         |
-| `INFISICAL_IDENTITY_ID`                | yes           | -                                         |
-| `INFISICAL_PROJECT_SLUG`               | one of*       | -                                         |
-| `INFISICAL_PROJECT_ID`                 | one of*       | -                                         |
-| `INFISICAL_ENVIRONMENT`                | yes           | -                                         |
-| `INFISICAL_SECRET_PATH`                | yes           | -                                         |
-| `NOMAD_NAMESPACE`                      | no            | `default`                                 |
-| `INFISICAL_URL`                        | no            | `https://app.infisical.com`               |
-| `INFISICAL_ORGANIZATION_SLUG`          | no            | unset                                     |
-| `INFISICAL_TAG_FILTERS`                | no            | empty (comma-separated slugs)             |
-| `INFISICAL_METADATA_FILTER`            | no            | unset                                     |
-| `INFISICAL_RECURSIVE`                  | no            | `false`                                   |
-| `INFISICAL_INCLUDE_IMPORTS`            | no            | `false`                                   |
-| `INFISICAL_INCLUDE_PERSONAL_OVERRIDES` | no            | `false`                                   |
-| `INFISICAL_EXPAND_REFERENCES`          | no            | `true`                                    |
-| `HTTP_TIMEOUT_SECONDS`                 | no            | `15`                                      |
-| `LOG_LEVEL`                            | no            | `INFO`                                    |
+| Variable                               | Required | Default value                             |
+|----------------------------------------|----------|-------------------------------------------|
+| `NOMAD_TOKEN`                          | yes      | - (injected by `identity { env = true }`) |
+| `NOMAD_ADDR`                           | yes      | -                                         |
+| `NOMAD_VAR_PATH`                       | yes      | -                                         |
+| `INFISICAL_IDENTITY_ID`                | yes      | -                                         |
+| `INFISICAL_PROJECT_SLUG`               | one of*  | -                                         |
+| `INFISICAL_PROJECT_ID`                 | one of*  | -                                         |
+| `INFISICAL_ENVIRONMENT`                | yes      | -                                         |
+| `INFISICAL_SECRET_PATH`                | yes      | -                                         |
+| `NOMAD_NAMESPACE`                      | no       | `default`                                 |
+| `INFISICAL_URL`                        | no       | `https://app.infisical.com`               |
+| `INFISICAL_ORGANIZATION_SLUG`          | no       | unset                                     |
+| `INFISICAL_TAG_FILTERS`                | no       | empty (comma-separated slugs)             |
+| `INFISICAL_METADATA_FILTER`            | no       | unset                                     |
+| `INFISICAL_RECURSIVE`                  | no       | `false`                                   |
+| `INFISICAL_INCLUDE_IMPORTS`            | no       | `false`                                   |
+| `INFISICAL_INCLUDE_PERSONAL_OVERRIDES` | no       | `false`                                   |
+| `INFISICAL_EXPAND_REFERENCES`          | no       | `true`                                    |
+| `SYNC_MODE`                            | no       | `leave-orphans`                           |
+| `HTTP_TIMEOUT_SECONDS`                 | no       | `15`                                      |
+| `LOG_LEVEL`                            | no       | `INFO`                                    |
 
 \* Configure a project slug (preferred) or project ID. If both are set, `INFISICAL_PROJECT_SLUG` takes precedence.
+
+### Sync modes
+
+- `leave-orphans` (default) updates keys from Infisical while preserving keys that exist only in the configured Nomad
+  Variable.
+- `full` makes the configured Nomad Variable exactly match the selected Infisical secrets. **It removes every key from
+  the Nomad Variable at `NOMAD_VAR_PATH` in `NOMAD_NAMESPACE` which is not present in infisical.**
 
 ### Process exit codes
 
@@ -198,13 +206,13 @@ nomad acl policy apply \
 ./integration/run.sh
 ```
 
-Spins up a disposable stack (Postgres, Redis, Infisical, Nomad), bootstraps fixtures, runs two E2E tests, and tears
-down:
+Spins up a disposable stack (Postgres, Redis, Infisical, Nomad), bootstraps fixtures, runs E2E tests, and tears down:
 
-| Test             | What it checks                                     |
-|------------------|----------------------------------------------------|
-| Authorized job   | JWT auth, metadata filtering, variable replacement |
-| Unauthorized job | Infisical rejects wrong job claim (exit code 3)    |
+| Test               | What it checks                                              |
+|--------------------|-------------------------------------------------------------|
+| Full sync          | Removes and logs Nomad-only secrets                         |
+| Leave-orphans sync | Preserves/logs orphans and updates Infisical-managed values |
+| Unauthorized job   | Infisical rejects wrong job claim (exit code 3)             |
 
 Pin versions in CI:
 

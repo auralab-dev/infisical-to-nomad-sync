@@ -24,15 +24,19 @@ def http_request(
 ) -> Any:
     """Send an HTTP request and return the parsed JSON body.
 
-    ``token_type`` controls the ``Authorization`` header prefix (e.g.
-    ``"Bearer"`` or ``"X-Nomad-Token"``).  ``label`` is prepended to
-    every error message so callers can identify the source.
+    ``token_type`` controls authentication. ``X-Nomad-Token`` is sent as
+    Nomad's dedicated header; other values are Authorization schemes.
+    ``label`` is prepended to every error message so callers can identify
+    the source.
     """
     headers: dict[str, str] = {"Accept": "application/json"}
     if body is not None:
         headers["Content-Type"] = "application/json"
     if token and token_type:
-        headers["Authorization"] = f"{token_type} {token}"
+        if token_type == "X-Nomad-Token":
+            headers[token_type] = token
+        else:
+            headers["Authorization"] = f"{token_type} {token}"
 
     data = json.dumps(body).encode() if body is not None else None
     request = Request(url, data=data, headers=headers, method=method)

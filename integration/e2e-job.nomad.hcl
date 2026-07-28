@@ -30,6 +30,7 @@ job "infisical-sync-e2e" {
         NOMAD_ADDR        = "http://nomad:4646"
         NOMAD_NAMESPACE   = "default"
         NOMAD_VAR_PATH    = "e2e/secrets/application"
+        SYNC_MODE         = "__SYNC_MODE__"
 
         INFISICAL_URL         = "http://infisical:8080"
         INFISICAL_IDENTITY_ID = "__INFISICAL_IDENTITY_ID__"
